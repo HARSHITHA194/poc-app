@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CI/CD GitOps POC</title>
+  <style>
+    :root { --bg:#0f172a; --card:#1e293b; --text:#e2e8f0; --muted:#94a3b8; --accent:#38bdf8; --ok:#22c55e; --bad:#ef4444; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, Segoe UI, sans-serif; background:var(--bg); color:var(--text); }
+    header { padding:32px 24px 8px; max-width:900px; margin:0 auto; }
+    h1 { margin:0 0 4px; font-size:28px; }
+    .sub { color:var(--muted); margin:0; }
+    main { max-width:900px; margin:0 auto; padding:16px 24px 48px; display:grid; gap:16px; }
+    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:16px; }
+    .card { background:var(--card); border-radius:12px; padding:16px 18px; }
+    .label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.06em; }
+    .value { font-size:22px; font-weight:600; margin-top:6px; word-break:break-all; }
+    .value.small { font-size:15px; }
+    .ok { color:var(--ok); } .bad { color:var(--bad); }
+    .flow { display:flex; flex-wrap:wrap; gap:8px; align-items:center; font-size:13px; }
+    .flow span.step { background:#0b1220; border:1px solid #334155; padding:4px 10px; border-radius:999px; }
+    .flow span.arrow { color:var(--muted); }
+    form { display:grid; gap:10px; }
+    input, textarea { background:#0b1220; color:var(--text); border:1px solid #334155; border-radius:8px; padding:10px; font:inherit; }
+    button { background:var(--accent); color:#04243a; border:0; border-radius:8px; padding:10px 16px; font-weight:600; cursor:pointer; }
+    ul { list-style:none; padding:0; margin:0; display:grid; gap:10px; }
+    li { background:#0b1220; border:1px solid #334155; border-radius:8px; padding:10px 12px; }
+    li .meta { color:var(--muted); font-size:12px; margin-top:4px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>CI/CD &amp; GitOps POC</h1>
+    <p class="sub">Developer → GitHub → Jenkins → Registry → Argo CD → Kubernetes → Azure Database</p>
+  </header>
+
+  <main>
+    <div class="grid">
+      <div class="card">
+        <div class="label">App version (image tag)</div>
+        <div class="value">{{ version }}</div>
+      </div>
+      <div class="card">
+        <div class="label">Serving pod</div>
+        <div class="value small">{{ pod }}</div>
+      </div>
+      <div class="card">
+        <div class="label">Azure Database</div>
+        <div class="value small {{ 'ok' if db.connected else 'bad' }}">
+          {{ '● Connected' if db.connected else '● Not connected' }}
+        </div>
+        <div class="label" style="margin-top:6px;text-transform:none">{{ db.detail }}</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="label" style="margin-bottom:10px">Pipeline</div>
+      <div class="flow">
+        <span class="step">Push code</span><span class="arrow">→</span>
+        <span class="step">Jenkins build/test/scan</span><span class="arrow">→</span>
+        <span class="step">Docker image</span><span class="arrow">→</span>
+        <span class="step">Registry</span><span class="arrow">→</span>
+        <span class="step">Git manifest update</span><span class="arrow">→</span>
+        <span class="step">Argo CD sync</span><span class="arrow">→</span>
+        <span class="step">Pods</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="label" style="margin-bottom:10px">Leave a message (stored in the database)</div>
+      <form method="post" action="/message">
+        <input name="name" placeholder="Your name" maxlength="50">
+        <textarea name="text" placeholder="Say something..." rows="2" maxlength="300" required></textarea>
+        <button type="submit">Post</button>
+      </form>
+    </div>
+
+    <div class="card">
+      <div class="label" style="margin-bottom:10px">Recent messages</div>
+      <ul>
+        {% for m in messages %}
+        <li>
+          <strong>{{ m.name }}</strong>: {{ m.text }}
+          <div class="meta">{{ m.created_at }} · pod {{ m.pod }} · v{{ m.version }}</div>
+        </li>
+        {% else %}
+        <li>No messages yet.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </main>
+</body>
+</html>
