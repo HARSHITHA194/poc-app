@@ -5,16 +5,16 @@ pipeline {
   agent any
 
   environment {
-    REGISTRY        = 'YOUR_REGISTRY.azurecr.io'          // e.g. Azure Container Registry or docker.io/youruser
+    REGISTRY        = 'docker.io/harshitha1904'          // e.g. Azure Container Registry or docker.io/youruser
     IMAGE_NAME      = 'poc-web'
     IMAGE_TAG       = "${env.BUILD_NUMBER}"
     REGISTRY_CREDS  = 'registry-credentials'              // Jenkins credentials ID (username/password)
     GIT_CREDS       = 'github-credentials'                // Jenkins credentials ID (username + PAT)
-    K8S_REPO        = 'github.com/YOUR_USER/poc-k8s-config.git'
+    K8S_REPO        = 'github.com/HARSHITHA194/poc-k8s-config.git'
   }
 
   triggers {
-    githubPush()   // fired by the GitHub webhook -> http://<jenkins>/github-webhook/
+    pollSCM('* * * * *')   // fired by the GitHub webhook -> http://<jenkins>/github-webhook/
   }
 
   stages {
@@ -65,7 +65,7 @@ pipeline {
       steps {
         withCredentials([usernamePassword(credentialsId: REGISTRY_CREDS, usernameVariable: 'REG_USER', passwordVariable: 'REG_PASS')]) {
           sh '''
-            echo "$REG_PASS" | docker login ${REGISTRY} -u "$REG_USER" --password-stdin
+            echo "$REG_PASS" | docker login -u "$REG_USER" --password-stdin
             docker push ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
           '''
         }
@@ -92,7 +92,7 @@ pipeline {
   }
 
   post {
-    always  { sh 'docker logout ${REGISTRY} || true' }
+    always  { sh 'docker logout || true' }
     success { echo "Image ${IMAGE_TAG} pushed; Argo CD will sync it to the cluster." }
   }
 }
