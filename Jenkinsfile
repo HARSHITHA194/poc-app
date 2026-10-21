@@ -79,7 +79,7 @@ pipeline {
             rm -rf k8s-config
             git clone https://${GIT_USER}:${GIT_PASS}@${K8S_REPO} k8s-config
             cd k8s-config
-            sed -i "s|image: .*|image: ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}|" deployment.yaml
+            sed -i "s|image: .*/poc-web:.*|image: ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}|" deployment.yaml
             git config user.email "jenkins@poc.local"
             git config user.name  "Jenkins"
             git add deployment.yaml
