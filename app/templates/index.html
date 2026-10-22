@@ -32,7 +32,7 @@
 <body>
   <header>
     <h1>CI/CD &amp; GitOps POC</h1>
-    <p class="sub">Developer → GitHub → Jenkins → Registry → Argo CD → Kubernetes → Azure Database</p>
+    <p class="sub">Developer â†’ GitHub â†’ Jenkins â†’ Registry â†’ Argo CD â†’ Kubernetes â†’ PostgreSQL Database</p>
   </header>
 
   <main>
@@ -46,9 +46,9 @@
         <div class="value small">{{ pod }}</div>
       </div>
       <div class="card">
-        <div class="label">Azure Database</div>
+        <div class="label">PostgreSQL Database</div>
         <div class="value small {{ 'ok' if db.connected else 'bad' }}">
-          {{ '● Connected' if db.connected else '● Not connected' }}
+          {{ 'â— Connected' if db.connected else 'â— Not connected' }}
         </div>
         <div class="label" style="margin-top:6px;text-transform:none">{{ db.detail }}</div>
       </div>
@@ -57,12 +57,12 @@
     <div class="card">
       <div class="label" style="margin-bottom:10px">Pipeline</div>
       <div class="flow">
-        <span class="step">Push code</span><span class="arrow">→</span>
-        <span class="step">Jenkins build/test/scan</span><span class="arrow">→</span>
-        <span class="step">Docker image</span><span class="arrow">→</span>
-        <span class="step">Registry</span><span class="arrow">→</span>
-        <span class="step">Git manifest update</span><span class="arrow">→</span>
-        <span class="step">Argo CD sync</span><span class="arrow">→</span>
+        <span class="step">Push code</span><span class="arrow">â†’</span>
+        <span class="step">Jenkins build/test/scan</span><span class="arrow">â†’</span>
+        <span class="step">Docker image</span><span class="arrow">â†’</span>
+        <span class="step">Registry</span><span class="arrow">â†’</span>
+        <span class="step">Git manifest update</span><span class="arrow">â†’</span>
+        <span class="step">Argo CD sync</span><span class="arrow">â†’</span>
         <span class="step">Pods</span>
       </div>
     </div>
@@ -82,7 +82,7 @@
         {% for m in messages %}
         <li>
           <strong>{{ m.name }}</strong>: {{ m.text }}
-          <div class="meta">{{ m.created_at }} · pod {{ m.pod }} · v{{ m.version }}</div>
+          <div class="meta">{{ m.created_at }} Â· pod {{ m.pod }} Â· v{{ m.version }}</div>
         </li>
         {% else %}
         <li>No messages yet.</li>
