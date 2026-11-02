@@ -32,7 +32,7 @@
 <body>
   <header>
 <h1>CI/CD &amp; GitOps POC - Feature Demo</h1>
-    <p class="sub">Developer → GitHub → Jenkins → Registry → Argo CD → Kubernetes → PostgreSQL Database</p>
+    <p class="sub">Developer → GitHub → Github Actions → Registry → Argo CD → Kubernetes → PostgreSQL Database</p>
   </header>
 
   <main>
@@ -58,7 +58,7 @@
       <div class="label" style="margin-bottom:10px">Pipeline</div>
       <div class="flow">
         <span class="step">Push code</span><span class="arrow">→</span>
-        <span class="step">Jenkins build/test/scan</span><span class="arrow">→</span>
+        <span class="step">Github Actions build/test/scan</span><span class="arrow">→</span>
         <span class="step">Docker image</span><span class="arrow">→</span>
         <span class="step">Registry</span><span class="arrow">→</span>
         <span class="step">Git manifest update</span><span class="arrow">→</span>
