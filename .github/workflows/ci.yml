@@ -311,12 +311,11 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Trivy (scan the image for vulnerabilities)
-        uses: aquasecurity/trivy-action@0.28.0
-        with:
-          image-ref: ${{ env.IMAGE_NAME }}:scan
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          exit-code: ${{ env.GATE_ENFORCE == 'true' && '1' || '0' }}
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image \
+            --severity HIGH,CRITICAL --ignore-unfixed --no-progress \
+            --exit-code ${{ env.GATE_ENFORCE == 'true' && '1' || '0' }} \
+            ${{ env.IMAGE_NAME }}:scan
 
       - name: Log in to Docker Hub
         if: github.ref == 'refs/heads/main'
