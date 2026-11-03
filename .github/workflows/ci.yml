@@ -2,17 +2,28 @@ name: CI
 
 on:
   push:
-    branches: [main, "feature/**"]
+    branches: [main]
   pull_request:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 env:
   IMAGE_NAME: poc-web
+  # "false" = report only. Change to "true" to block the deploy when a quality or security check fails.
+  GATE_ENFORCE: "false"
 
 jobs:
+  # ---------------------------------------------------------------- 1. Tests
   build-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: app
@@ -35,14 +46,21 @@ jobs:
       - name: Run tests
         run: pytest -q
 
+  # ------------------------------------- 2. Code review and security checks
   quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
     defaults:
       run:
         working-directory: app
     steps:
-      - name: Checkout code
+      - name: Checkout code (full history for secret scan)
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -54,28 +72,213 @@ jobs:
       - name: Install dependencies and quality tools
         run: |
           pip install -r requirements.txt
-          pip install pytest pytest-cov flake8 pylint bandit pip-audit radon
+          pip install pytest pytest-cov bandit pip-audit flake8 pylint radon xenon semgrep
           mkdir -p ../reports
 
-      - name: Security scan (bandit)
-        run: bandit -r . -ll -s B104 -x ./tests -f txt -o ../reports/bandit.txt || true
-
-      - name: Dependency vulnerabilities (pip-audit)
-        run: pip-audit -r requirements.txt > ../reports/pip-audit.txt 2>&1 || true
-
-      - name: Style and bugs (flake8)
-        run: flake8 . --max-line-length=120 --count --statistics > ../reports/flake8.txt || true
-
-      - name: Code analysis (pylint)
-        run: pylint $(git ls-files '*.py') > ../reports/pylint.txt || true
-
-      - name: Complexity (radon)
+      - name: bandit (security issues in code)
+        id: bandit
+        continue-on-error: true
         run: |
-          radon cc . -s -a -nB > ../reports/radon-complexity.txt
-          radon mi . -s > ../reports/radon-maintainability.txt
+          rc=0
+          bandit -r app.py -ll -s B104 > ../reports/bandit.txt 2>&1 || rc=$?
+          cat ../reports/bandit.txt
+          exit $rc
 
-      - name: Test coverage (pytest-cov)
-        run: pytest --cov=. --cov-report=term --cov-report=xml:../reports/coverage.xml -q > ../reports/coverage.txt || true
+      - name: pip-audit (vulnerable libraries)
+        id: pipaudit
+        continue-on-error: true
+        run: |
+          rc=0
+          pip-audit -r requirements.txt > ../reports/pip-audit.txt 2>&1 || rc=$?
+          cat ../reports/pip-audit.txt
+          exit $rc
+
+      - name: flake8 (code style)
+        id: flake8
+        continue-on-error: true
+        run: |
+          rc=0
+          flake8 app.py --max-line-length=120 --count --statistics > ../reports/flake8.txt 2>&1 || rc=$?
+          cat ../reports/flake8.txt
+          exit $rc
+
+      - name: pylint (bugs and code smells, must score 7/10)
+        id: pylint
+        continue-on-error: true
+        run: |
+          rc=0
+          pylint app.py --fail-under=7 > ../reports/pylint.txt 2>&1 || rc=$?
+          cat ../reports/pylint.txt
+          exit $rc
+
+      - name: radon (complexity and maintainability, information only)
+        run: |
+          radon cc app.py -s -a | tee ../reports/radon-complexity.txt
+          radon mi app.py -s | tee ../reports/radon-maintainability.txt
+
+      - name: xenon (complexity limits)
+        id: xenon
+        continue-on-error: true
+        run: |
+          rc=0
+          xenon --max-absolute C --max-modules B --max-average B app.py > ../reports/xenon.txt 2>&1 || rc=$?
+          cat ../reports/xenon.txt
+          exit $rc
+
+      - name: pytest-cov (test coverage must be 60% or more)
+        id: coverage
+        continue-on-error: true
+        run: |
+          rc=0
+          python -m pytest --cov=app --cov-report=term --cov-report=xml:../reports/coverage.xml \
+            --junitxml=../reports/junit.xml --cov-fail-under=60 -q > ../reports/coverage.txt 2>&1 || rc=$?
+          cat ../reports/coverage.txt
+          exit $rc
+
+      - name: hadolint (Dockerfile best practices)
+        id: hadolint
+        continue-on-error: true
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: app/Dockerfile
+          failure-threshold: warning
+
+      - name: semgrep (security rules)
+        id: semgrep
+        continue-on-error: true
+        run: |
+          rc=0
+          semgrep scan --config p/python --metrics off --error app.py > ../reports/semgrep.txt 2>&1 || rc=$?
+          cat ../reports/semgrep.txt
+          exit $rc
+
+      - name: gitleaks (secrets committed by mistake)
+        id: gitleaks
+        continue-on-error: true
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+
+      - name: Quality summary, email body and gate
+        id: summary
+        if: always()
+        env:
+          R_BANDIT: ${{ steps.bandit.outcome }}
+          R_PIPAUDIT: ${{ steps.pipaudit.outcome }}
+          R_FLAKE8: ${{ steps.flake8.outcome }}
+          R_PYLINT: ${{ steps.pylint.outcome }}
+          R_XENON: ${{ steps.xenon.outcome }}
+          R_COVERAGE: ${{ steps.coverage.outcome }}
+          R_HADOLINT: ${{ steps.hadolint.outcome }}
+          R_SEMGREP: ${{ steps.semgrep.outcome }}
+          R_GITLEAKS: ${{ steps.gitleaks.outcome }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          WHO: ${{ github.actor }}
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          score=$(grep -oP 'rated at \K[0-9.]+' ../reports/pylint.txt 2>/dev/null | tail -1)
+          cov=$(grep -oP 'TOTAL.*\s\K[0-9]+(?=%)' ../reports/coverage.txt 2>/dev/null | tail -1)
+          flake=$(grep -E '^[0-9]+$' ../reports/flake8.txt 2>/dev/null | tail -1)
+          mark() { if [ "$1" = "success" ]; then echo "✅ Passed"; else echo "❌ Needs attention"; fi; }
+
+          {
+            echo "## Code quality and security report"
+            echo ""
+            echo "| Check | Result | Detail |"
+            echo "|---|---|---|"
+            echo "| bandit (code security) | $(mark "$R_BANDIT") | |"
+            echo "| pip-audit (libraries) | $(mark "$R_PIPAUDIT") | |"
+            echo "| flake8 (style) | $(mark "$R_FLAKE8") | issues: ${flake:-0} |"
+            echo "| pylint (code analysis) | $(mark "$R_PYLINT") | score: ${score:-n/a}/10 (needs 7) |"
+            echo "| xenon (complexity) | $(mark "$R_XENON") | |"
+            echo "| coverage | $(mark "$R_COVERAGE") | ${cov:-n/a}% (needs 60%) |"
+            echo "| hadolint (Dockerfile) | $(mark "$R_HADOLINT") | |"
+            echo "| semgrep (security rules) | $(mark "$R_SEMGREP") | |"
+            echo "| gitleaks (secrets) | $(mark "$R_GITLEAKS") | |"
+            echo ""
+            echo "Quality gate enforcement: **$GATE_ENFORCE**. Full reports are in the run's \`quality-reports\` download."
+          } > ../reports/summary.md
+
+          cat ../reports/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+          # Email body: summary plus the details of every check that needs attention
+          add() {
+            if [ "$2" != "success" ] && [ -s "../reports/$1.txt" ]; then
+              echo ""
+              echo "**$1: what needs to be fixed**"
+              echo ""
+              echo '```'
+              head -n 40 "../reports/$1.txt"
+              echo '```'
+            fi
+          }
+          {
+            echo "Hello,"
+            echo ""
+            echo "The automated code review found items that need attention."
+            echo ""
+            echo "- Repository: ${GITHUB_REPOSITORY}"
+            echo "- Branch: ${BRANCH}"
+            echo "- Commit: ${SHA}"
+            echo "- Pushed by: ${WHO}"
+            echo "- Full run and reports: ${RUN_URL}"
+            echo ""
+            cat ../reports/summary.md
+            add bandit "$R_BANDIT"
+            add pip-audit "$R_PIPAUDIT"
+            add flake8 "$R_FLAKE8"
+            add pylint "$R_PYLINT"
+            add xenon "$R_XENON"
+            add coverage "$R_COVERAGE"
+            add semgrep "$R_SEMGREP"
+            echo ""
+            echo "Please fix these and push again. The complete reports are attached."
+          } > ../reports/email.md
+
+          FAILED=0
+          for r in "$R_BANDIT" "$R_PIPAUDIT" "$R_FLAKE8" "$R_PYLINT" "$R_XENON" "$R_COVERAGE" "$R_HADOLINT" "$R_SEMGREP" "$R_GITLEAKS"; do
+            if [ "$r" != "success" ]; then FAILED=$((FAILED+1)); fi
+          done
+          echo "failed=$FAILED" >> "$GITHUB_OUTPUT"
+          echo "Checks needing attention: $FAILED"
+          if [ "$FAILED" -gt 0 ] && [ "$GATE_ENFORCE" = "true" ]; then
+            echo "QUALITY GATE FAILED"
+            exit 1
+          fi
+
+      - name: Comment the report on the pull request
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('reports/summary.md', 'utf8');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body
+            });
+
+      - name: Email the code review to the developers
+        if: always() && steps.summary.outputs.failed != '' && steps.summary.outputs.failed != '0'
+        continue-on-error: true
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "Code review: ${{ steps.summary.outputs.failed }} check(s) need attention in ${{ github.repository }} (${{ github.head_ref || github.ref_name }})"
+          to: ${{ secrets.DEVELOPER_EMAILS }}
+          from: "CI Code Review <${{ secrets.MAIL_USERNAME }}>"
+          body: file://reports/email.md
+          convert_markdown: true
+          attachments: reports/*.txt,reports/coverage.xml
 
       - name: Upload quality reports
         if: always()
@@ -84,36 +287,60 @@ jobs:
           name: quality-reports
           path: reports/
 
+  # ------------------------------ 3. Build, scan the image, push (main only)
   docker:
-    needs: build-test
+    needs: [build-test, quality]
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image (local, for scanning)
+        uses: docker/build-push-action@v6
+        with:
+          context: app
+          load: true
+          build-args: |
+            APP_VERSION=gha-${{ github.run_number }}
+          tags: ${{ env.IMAGE_NAME }}:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy (scan the image for vulnerabilities)
+        run: |
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock aquasec/trivy:latest image \
+            --severity HIGH,CRITICAL --ignore-unfixed --no-progress \
+            --exit-code ${{ env.GATE_ENFORCE == 'true' && '1' || '0' }} \
+            ${{ env.IMAGE_NAME }}:scan
+
       - name: Log in to Docker Hub
+        if: github.ref == 'refs/heads/main'
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build and push image
+      - name: Push image
+        if: github.ref == 'refs/heads/main'
         uses: docker/build-push-action@v6
         with:
           context: app
           push: true
           build-args: |
             APP_VERSION=gha-${{ github.run_number }}
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:gha-${{ github.run_number }}
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:gha-${{ github.run_number }}
+          cache-from: type=gha
 
+  # ------------------------------ 4. Update the GitOps config repo (main only)
   update-config:
     needs: docker
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     concurrency: update-config
     steps:
       - name: Check out the config repo
