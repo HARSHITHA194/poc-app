@@ -3,6 +3,8 @@ name: CI
 on:
   push:
     branches: [main, "feature/**"]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 env:
@@ -32,6 +34,55 @@ jobs:
 
       - name: Run tests
         run: pytest -q
+
+  quality:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: app/requirements.txt
+
+      - name: Install dependencies and quality tools
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-cov flake8 pylint bandit pip-audit radon
+          mkdir -p ../reports
+
+      - name: Security scan (bandit)
+        run: bandit -r . -ll -s B104 -x ./tests -f txt -o ../reports/bandit.txt || true
+
+      - name: Dependency vulnerabilities (pip-audit)
+        run: pip-audit -r requirements.txt > ../reports/pip-audit.txt 2>&1 || true
+
+      - name: Style and bugs (flake8)
+        run: flake8 . --max-line-length=120 --count --statistics > ../reports/flake8.txt || true
+
+      - name: Code analysis (pylint)
+        run: pylint $(git ls-files '*.py') > ../reports/pylint.txt || true
+
+      - name: Complexity (radon)
+        run: |
+          radon cc . -s -a -nB > ../reports/radon-complexity.txt
+          radon mi . -s > ../reports/radon-maintainability.txt
+
+      - name: Test coverage (pytest-cov)
+        run: pytest --cov=. --cov-report=term --cov-report=xml:../reports/coverage.xml -q > ../reports/coverage.txt || true
+
+      - name: Upload quality reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-reports
+          path: reports/
 
   docker:
     needs: build-test
