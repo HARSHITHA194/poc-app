@@ -183,6 +183,18 @@ jobs:
           flake=$(grep -E '^[0-9]+$' ../reports/flake8.txt 2>/dev/null | tail -1)
           mark() { if [ "$1" = "success" ]; then echo "✅ Passed"; else echo "❌ Needs attention"; fi; }
 
+          fails=0
+          for r in "$R_BANDIT" "$R_PIPAUDIT" "$R_FLAKE8" "$R_PYLINT" "$R_XENON" "$R_COVERAGE" "$R_HADOLINT" "$R_SEMGREP" "$R_GITLEAKS"; do
+            if [ "$r" != "success" ]; then fails=$((fails+1)); fi
+          done
+          if [ "$fails" -eq 0 ]; then
+            intro="All checks passed. Nothing needs to be fixed."
+            outro="No action needed."
+          else
+            intro="The automated code review found items that need attention."
+            outro="Please fix these and push again."
+          fi
+
           {
             echo "## Code quality and security report"
             echo ""
@@ -217,7 +229,7 @@ jobs:
           {
             echo "Hello,"
             echo ""
-            echo "The automated code review found items that need attention."
+            echo "$intro"
             echo ""
             echo "- Repository: ${GITHUB_REPOSITORY}"
             echo "- Branch: ${BRANCH}"
@@ -234,7 +246,7 @@ jobs:
             add coverage "$R_COVERAGE"
             add semgrep "$R_SEMGREP"
             echo ""
-            echo "Please fix these and push again. The complete reports are attached."
+            echo "$outro The complete reports are attached."
           } > ../reports/email.md
 
           # HTML version of the email (real table, works in Outlook and Gmail)
@@ -258,7 +270,7 @@ jobs:
           {
             echo "<div style=\"font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1b2430;max-width:760px\">"
             echo "<p>Hello,</p>"
-            echo "<p>The automated code review found items that need attention.</p>"
+            echo "<p>$intro</p>"
             echo "<ul><li><b>Repository:</b> ${GITHUB_REPOSITORY}</li><li><b>Branch:</b> ${BRANCH}</li><li><b>Commit:</b> ${SHA}</li><li><b>Pushed by:</b> ${WHO}</li><li><b>Full run and reports:</b> <a href=\"${RUN_URL}\">open the run</a></li></ul>"
             echo "<h2 style=\"font-size:18px\">Code quality and security report</h2>"
             echo "<table style=\"border-collapse:collapse;font-size:14px\">"
@@ -281,7 +293,7 @@ jobs:
             details xenon "$R_XENON"
             details coverage "$R_COVERAGE"
             details semgrep "$R_SEMGREP"
-            echo "<p>Please fix these and push again.</p>"
+            echo "<p>$outro</p>"
             echo "</div>"
           } > ../reports/email.html
 
@@ -312,7 +324,7 @@ jobs:
             });
 
       - name: Email the code review to the developers
-        if: always() && steps.summary.outputs.failed != '' && steps.summary.outputs.failed != '0'
+        if: always() && steps.summary.outputs.failed != ''
         continue-on-error: true
         uses: dawidd6/action-send-mail@v3
         with:
@@ -321,7 +333,7 @@ jobs:
           secure: true
           username: ${{ secrets.MAIL_USERNAME }}
           password: ${{ secrets.MAIL_PASSWORD }}
-          subject: "Code review: ${{ steps.summary.outputs.failed }} check(s) need attention in ${{ github.repository }} (${{ github.head_ref || github.ref_name }})"
+          subject: "${{ steps.summary.outputs.failed == '0' && 'Code review passed: all checks OK' || format('Code review: {0} check(s) need attention', steps.summary.outputs.failed) }} in ${{ github.repository }} (${{ github.head_ref || github.ref_name }})"
           to: ${{ secrets.DEVELOPER_EMAILS }}
           from: "CI Code Review <${{ secrets.MAIL_USERNAME }}>"
           body: file://reports/email.md
