@@ -277,6 +277,7 @@ jobs:
           to: ${{ secrets.DEVELOPER_EMAILS }}
           from: "CI Code Review <${{ secrets.MAIL_USERNAME }}>"
           body: file://reports/email.md
+          html_body: file://reports/email.md
           convert_markdown: true
           attachments: reports/*.txt,reports/coverage.xml
 
