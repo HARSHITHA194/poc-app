@@ -237,6 +237,54 @@ jobs:
             echo "Please fix these and push again. The complete reports are attached."
           } > ../reports/email.md
 
+          # HTML version of the email (real table, works in Outlook and Gmail)
+          esc() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g'; }
+          row() {
+            if [ "$2" = "success" ]; then
+              c="#12663a"; t="&#9989; Passed"
+            else
+              c="#b3262b"; t="&#10060; Needs attention"
+            fi
+            echo "<tr><td style=\"padding:8px 12px;border:1px solid #d9dee5\">$1</td><td style=\"padding:8px 12px;border:1px solid #d9dee5;color:$c;font-weight:600\">$t</td><td style=\"padding:8px 12px;border:1px solid #d9dee5\">$3</td></tr>"
+          }
+          details() {
+            if [ "$2" != "success" ] && [ -s "../reports/$1.txt" ]; then
+              echo "<h3 style=\"margin:20px 0 6px;font-size:15px\">$1: what needs to be fixed</h3>"
+              echo "<pre style=\"background:#f3f5f8;border:1px solid #d9dee5;border-radius:6px;padding:10px;font-size:12px;white-space:pre-wrap\">"
+              head -n 40 "../reports/$1.txt" | esc
+              echo "</pre>"
+            fi
+          }
+          {
+            echo "<div style=\"font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1b2430;max-width:760px\">"
+            echo "<p>Hello,</p>"
+            echo "<p>The automated code review found items that need attention.</p>"
+            echo "<ul><li><b>Repository:</b> ${GITHUB_REPOSITORY}</li><li><b>Branch:</b> ${BRANCH}</li><li><b>Commit:</b> ${SHA}</li><li><b>Pushed by:</b> ${WHO}</li><li><b>Full run and reports:</b> <a href=\"${RUN_URL}\">open the run</a></li></ul>"
+            echo "<h2 style=\"font-size:18px\">Code quality and security report</h2>"
+            echo "<table style=\"border-collapse:collapse;font-size:14px\">"
+            echo "<tr style=\"background:#eef2f6\"><th style=\"padding:8px 12px;border:1px solid #d9dee5;text-align:left\">Check</th><th style=\"padding:8px 12px;border:1px solid #d9dee5;text-align:left\">Result</th><th style=\"padding:8px 12px;border:1px solid #d9dee5;text-align:left\">Detail</th></tr>"
+            row "bandit (code security)" "$R_BANDIT" ""
+            row "pip-audit (libraries)" "$R_PIPAUDIT" ""
+            row "flake8 (style)" "$R_FLAKE8" "issues: ${flake:-0}"
+            row "pylint (code analysis)" "$R_PYLINT" "score: ${score:-n/a}/10 (needs 7)"
+            row "xenon (complexity)" "$R_XENON" ""
+            row "coverage" "$R_COVERAGE" "${cov:-n/a}% (needs 60%)"
+            row "hadolint (Dockerfile)" "$R_HADOLINT" ""
+            row "semgrep (security rules)" "$R_SEMGREP" ""
+            row "gitleaks (secrets)" "$R_GITLEAKS" ""
+            echo "</table>"
+            echo "<p style=\"color:#6b7787\">Quality gate enforcement: <b>$GATE_ENFORCE</b>. Full reports are attached and in the run's <code>quality-reports</code> download.</p>"
+            details bandit "$R_BANDIT"
+            details pip-audit "$R_PIPAUDIT"
+            details flake8 "$R_FLAKE8"
+            details pylint "$R_PYLINT"
+            details xenon "$R_XENON"
+            details coverage "$R_COVERAGE"
+            details semgrep "$R_SEMGREP"
+            echo "<p>Please fix these and push again.</p>"
+            echo "</div>"
+          } > ../reports/email.html
+
           FAILED=0
           for r in "$R_BANDIT" "$R_PIPAUDIT" "$R_FLAKE8" "$R_PYLINT" "$R_XENON" "$R_COVERAGE" "$R_HADOLINT" "$R_SEMGREP" "$R_GITLEAKS"; do
             if [ "$r" != "success" ]; then FAILED=$((FAILED+1)); fi
@@ -277,8 +325,7 @@ jobs:
           to: ${{ secrets.DEVELOPER_EMAILS }}
           from: "CI Code Review <${{ secrets.MAIL_USERNAME }}>"
           body: file://reports/email.md
-          html_body: file://reports/email.md
-          convert_markdown: true
+          html_body: file://reports/email.html
           attachments: reports/*.txt,reports/coverage.xml
 
       - name: Upload quality reports
