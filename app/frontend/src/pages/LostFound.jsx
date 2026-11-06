@@ -52,7 +52,7 @@ export default function LostFound() {
         <form onSubmit={add}>
           <div className="row">
             <input placeholder="Item *" value={f.item} onChange={(e) => setF({ ...f, item: e.target.value })} required />
-            <input placeholder="Where found *" value={f.found_at} onChange={(e) => setF({ ...f, found_at: e.target.value })} required />
+            <input placeholder="Where is it found *" value={f.found_at} onChange={(e) => setF({ ...f, found_at: e.target.value })} required />
           </div>
           <textarea rows="3" placeholder="Description *" value={f.description}
             onChange={(e) => setF({ ...f, description: e.target.value })} required />
